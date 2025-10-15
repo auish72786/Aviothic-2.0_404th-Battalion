@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartMed — Medicine Reminder</title>
+<style>
+  :root{
+    --primary:#3A86FF;
+    --accent:#06D6A0;
+    --bg:#F8FAFC;
+    --card:#ffffff;
+    --text:#1E293B;
+  }
+  *{box-sizing:border-box;font-family:Arial, sans-serif;}
+  body{margin:0;background:linear-gradient(180deg,#f8fbff 0%,#f2fcf7 100%);color:var(--text);}
+  .container{max-width:900px;margin:20px auto;padding:15px;}
+  h1,h2{margin:0 0 10px 0;}
+  .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;}
+  .topbar h1{color:var(--primary);}
+  .sub{color:#475569;font-size:14px;}
+  .next-card{background:linear-gradient(90deg,var(--primary),var(--accent));color:white;padding:10px 15px;border-radius:12px;margin-top:10px;text-align:center;font-weight:600;}
+  main{display:grid;grid-template-columns:1fr 1fr;gap:15px;}
+  .card{background:var(--card);padding:15px;border-radius:12px;box-shadow:0 8px 25px rgba(0,0,0,0.1);transition:0.3s;}
+  .card:hover{transform:translateY(-3px);}
+  .row{display:flex;gap:10px;margin-bottom:10px;}
+  input,select,textarea{flex:1;padding:10px;border-radius:8px;border:1px solid #e6eef7;transition:0.3s;}
+  input:focus,select:focus,textarea:focus{border-color:var(--primary);outline:none;}
+  textarea{resize:vertical;min-height:60px;}
+  .actions{justify-content:flex-end;display:flex;gap:10px;}
+  .btn{padding:8px 14px;border:none;border-radius:10px;cursor:pointer;background:#eef4ff;color:var(--primary);transition:0.3s;}
+  .btn:hover{opacity:0.85;}
+  .btn.primary{background:linear-gradient(90deg,var(--primary),var(--accent));color:white;}
+  .med-card{display:flex;justify-content:space-between;align-items:center;padding:12px;border-radius:12px;background:linear-gradient(180deg,#fff,#f6fbff);margin-bottom:10px;box-shadow:0 4px 15px rgba(0,0,0,0.05);}
+  .med-card:hover{box-shadow:0 6px 20px rgba(0,0,0,0.08);}
+  .pill{width:45px;height:45px;border-radius:12px;background:linear-gradient(90deg,var(--primary),var(--accent));display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:18px;}
+  .small{font-size:12px;color:#64748b;}
+  @media(max-width:800px){main{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+<div class="container">
+  <header class="topbar">
+    <div>
+      <h1>SmartMed</h1>
+      <p class="sub">Your health, on time</p>
+    </div>
+  </header>
+  <div class="next-card" id="nextCard">No upcoming dose</div>
+
+  <main>
+    <!-- Add Medicine -->
+    <section class="card">
+      <h2>Add Medicine</h2>
+      <form id="addForm">
+        <div class="row">
+          <input type="text" id="name" placeholder="Medicine name" required>
+          <input type="text" id="dose" placeholder="Dose (e.g., 1 tablet)" required>
+        </div>
+        <div class="row">
+          <input type="date" id="startDate">
+          <input type="number" id="quantity" placeholder="Quantity" min="0">
+        </div>
+        <div class="row">
+          <label>Times (comma HH:MM):</label>
+          <input type="text" id="times" placeholder="08:00,20:00">
+        </div>
+        <div class="row actions">
+          <button type="submit" class="btn primary">Save Medicine</button>
+          <button type="button" id="clearBtn" class="btn">Clear</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Medicines List -->
+    <section class="card">
+      <h2>Medicines</h2>
+      <div id="medList"></div>
+    </section>
+
+    <!-- Weekly Report -->
+    <section class="card">
+      <h2>Weekly Report</h2>
+      <div id="report">No data yet.</div>
+    </section>
+
+    <!-- Side Effects -->
+    <section class="card">
+      <h2>Report Side Effect</h2>
+      <form id="seForm">
+        <select id="seMed"></select>
+        <textarea id="effectText" placeholder="Describe the effect..."></textarea>
+        <div class="row actions">
+          <button type="submit" class="btn primary">Submit</button>
+        </div>
+      </form>
+    </section>
+  </main>
+</div>
+
+<script>
+  // ===== UTILS =====
+  function nowISO(){return new Date().toISOString();}
+  function loadData(key){return JSON.parse(localStorage.getItem(key)||'[]');}
+  function saveData(key,data){localStorage.setItem(key,JSON.stringify(data));}
+  function nextID(arr){return arr.length?Math.max(...arr.map(a=>a.id))+1:1;}
+
+  // ===== LOAD MEDS =====
+  function loadMeds(){
+    const meds = loadData('medicines');
+    renderMeds(meds);
+    populateSEmSelect(meds);
+    computeNextDose(meds);
+    loadReport();
+  }
+
+  function renderMeds(meds){
+    const out = document.getElementById('medList'); out.innerHTML='';
+    if(!meds.length){out.innerHTML='<div class="small">No medicines yet.</div>'; return;}
+    meds.forEach(m=>{
+      const timesLabel = (m.times||[]).join(' • ');
+      const div = document.createElement('div');
+      div.className='med-card';
+      div.innerHTML=`
+        <div style="display:flex;gap:10px;align-items:center">
+          <div class="pill">M</div>
+          <div>
+            <div style="font-weight:600">${m.name} <span class="small">• ${m.dose}</span></div>
+            <div class="small">Times: ${timesLabel}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:5px;">
+          <button class="btn" onclick="triggerReminder(${m.id})">Remind now</button>
+          <button class="btn" style="color:#ef4444" onclick="deleteMed(${m.id})">Delete</button>
+        </div>
+      `;
+      out.appendChild(div);
+    });
+  }
+
+  function populateSEmSelect(meds){
+    const sel = document.getElementById('seMed'); sel.innerHTML='';
+    const opt = document.createElement('option'); opt.value=''; opt.text='-- Select Medicine --'; sel.appendChild(opt);
+    meds.forEach(m=>{const o=document.createElement('option');o.value=m.id;o.text=m.name;sel.appendChild(o);});
+  }
+
+  // ===== NEXT DOSE =====
+  function computeNextDose(meds){
+    const now = new Date();
+    let next=null;
+    meds.forEach(m=>{
+      (m.times||[]).forEach(t=>{
+        const [hh,mm]=t.split(':').map(Number);
+        const dt=new Date(now.getFullYear(),now.getMonth(),now.getDate(),hh,mm);
+        if(dt<now) dt.setDate(dt.getDate()+1);
+        if(!next || dt<next.dt) next={dt,med:m,time:t};
+      });
+    });
+    const card=document.getElementById('nextCard');
+    if(!next){card.innerText='No upcoming dose';return;}
+    const diff=Math.round((next.dt-now)/60000);
+    card.innerText=`Next: ${next.med.name} in ${diff} min (${next.time})`;
+    scheduleNotification(next);
+  }
+
+  let alarmAudio = new Audio('https://www.soundjay.com/buttons/sounds/beep-07.mp3');
+  let scheduledTimers=[];
+  function scheduleNotification(next){
+    scheduledTimers.forEach(i=>clearTimeout(i));
+    scheduledTimers=[];
+    const now=new Date();
+    const gap=next.dt-now;
+    if(gap<=0) return;
+    const id=setTimeout(()=>{showReminderUI(next.med);},gap);
+    scheduledTimers.push(id);
+  }
+
+  function showReminderUI(med){
+    const popup = document.createElement('div');
+    popup.style.position='fixed'; popup.style.top='50%'; popup.style.left='50%';
+    popup.style.transform='translate(-50%,-50%)';
+    popup.style.background='white'; popup.style.padding='25px';
+    popup.style.borderRadius='15px'; popup.style.boxShadow='0 8px 25px rgba(0,0,0,0.3)';
+    popup.style.zIndex=9999;
+    popup.innerHTML=`
+      <h3 style="margin-bottom:8px;">Time to take ${med.name}</h3>
+      <p>${med.dose}</p>
+      <div style="display:flex;gap:12px;justify-content:center;margin-top:15px;">
+        <button id="takenBtn" class="btn primary">Taken</button>
+        <button id="missedBtn" class="btn" style="color:#ef4444">Missed</button>
+      </div>
+    `;
+    document.body.appendChild(popup);
+
+    alarmAudio.loop=true;
+    const playPromise = alarmAudio.play();
+    if (playPromise !== undefined) { playPromise.catch(_=>{}); }
+
+    function stopAlarmAndLog(status){
+      alarmAudio.pause(); alarmAudio.currentTime=0;
+      const logs=loadData('doselog');
+      logs.push({medId:med.id,dateTime:nowISO(),status});
+      saveData('doselog',logs);
+      document.body.removeChild(popup);
+      alert(`${med.name} marked as ${status}`);
+      loadMeds();
+    }
+
+    document.getElementById('takenBtn').onclick=()=>stopAlarmAndLog('Taken');
+    document.getElementById('missedBtn').onclick=()=>stopAlarmAndLog('Missed');
+  }
+
+  function triggerReminder(id){
+    const meds=loadData('medicines');
+    const m = meds.find(x=>x.id==id);
+    if(m) showReminderUI(m);
+  }
+
+  function deleteMed(id){
+    if(!confirm('Delete this medicine?')) return;
+    let meds=loadData('medicines');
+    meds=meds.filter(m=>m.id!=id);
+    saveData('medicines',meds);
+    loadMeds();
+  }
+
+  // ===== ADD MEDICINE =====
+  document.getElementById('addForm').addEventListener('submit',e=>{
+    e.preventDefault();
+    const name=document.getElementById('name').value.trim();
+    const dose=document.getElementById('dose').value.trim();
+    const timesStr=document.getElementById('times').value.trim();
+    const times=timesStr?timesStr.split(',').map(s=>s.trim()):[];
+    const startDate=document.getElementById('startDate').value||null;
+    const quantity=parseInt(document.getElementById('quantity').value||'0',10);
+    const meds=loadData('medicines');
+    meds.push({id:nextID(meds),name,dose,times,startDate,quantity});
+    saveData('medicines',meds);
+    document.getElementById('addForm').reset();
+    loadMeds();
+  });
+
+  document.getElementById('clearBtn').addEventListener('click',()=>{document.getElementById('addForm').reset();});
+
+  // ===== SIDE EFFECT =====
+  document.getElementById('seForm').addEventListener('submit',e=>{
+    e.preventDefault();
+    const medId=document.getElementById('seMed').value;
+    const effect=document.getElementById('effectText').value.trim();
+    if(!medId||!effect){alert('Select medicine and describe effect');return;}
+    const side=loadData('sideeffects');
+    side.push({medId:parseInt(medId),effect,dateTime:nowISO()});
+    saveData('sideeffects',side);
+    alert('Side effect reported. Thank you.');
+    document.getElementById('seForm').reset();
+  });
+
+  // ===== WEEKLY REPORT =====
+  function loadReport(){
+    let logs = loadData('doselog');
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    // keep only last 7 days
+    const recentLogs = logs.filter(log => new Date(log.dateTime) >= sevenDaysAgo);
+    saveData('doselog', recentLogs);
+
+    const report = {taken:0, missed:0};
+    recentLogs.forEach(l=>{
+      if(l.status==='Taken') report.taken++;
+      else if(l.status==='Missed') report.missed++;
+    });
+
+    document.getElementById('report').innerHTML=
+      `<div class="small">Taken: <strong>${report.taken}</strong> • Missed: <strong>${report.missed}</strong></div>`;
+  }
+
+  // ===== START =====
+  loadMeds();
+</script>
+</body>
+</html>
